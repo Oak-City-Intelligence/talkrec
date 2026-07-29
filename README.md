@@ -1,0 +1,102 @@
+# talkrec
+
+A tiny click-to-record voice-to-text tool: click the tray icon (or press a
+hotkey), speak, click/press again, and the transcription lands on your
+clipboard a couple seconds later. Runs whisper locally on CPU — no network
+calls, no cloud API, nothing leaves your machine.
+
+**Status: personal tool, pre-1.0, evolving.** Built for one operator's daily
+setup and published as-is. Tested on Arch Linux, KDE Plasma 6, Wayland,
+PipeWire. Should work on other Linux desktops with a working system tray, but
+the tray-click and hotkey-binding steps below are KDE-specific.
+
+## How it works
+
+```
+tray click / hotkey → toggle
+  idle -> recording:  starts capturing audio via PipeWire
+  recording -> idle:  stops capture, transcribes with whisper (CPU),
+                       copies text to clipboard, plays a done sound
+```
+
+The daemon and the hotkey are separate processes talking over a local Unix
+socket (`/tmp/talkrec_unique_server`) — `talkrec-toggle` is a small
+stdlib-only script so a hotkey press doesn't pay Python/Qt startup cost. The
+daemon itself is a normal PyQt6 tray-icon app; only one instance ever runs
+(a second launch detects the running one and exits).
+
+## Requirements
+
+- Linux with PipeWire (used for audio capture and for its `pipewire` virtual
+  ALSA device, which resamples to whatever rate whisper wants — a raw ALSA
+  hardware device usually can't and will fail to open at 16kHz)
+- A working system tray (any freedesktop StatusNotifierItem host)
+- Python 3.10+
+- System tools: `ydotool` (optional, for auto-paste), `wl-copy`, `paplay`
+- Python packages: see `requirements.txt` (PyQt6, sounddevice, numpy,
+  openai-whisper — the latter pulls in torch)
+
+## Install
+
+```sh
+git clone <this-repo> && cd talkrec
+./install.sh
+```
+
+`install.sh` is idempotent and prints everything it does:
+
+1. creates a venv in the repo (`./venv`) and installs Python dependencies
+2. symlinks `bin/talkrec` and `bin/talkrec-toggle` into `~/.local/bin`
+3. symlinks `systemd/talkrec.service` into `~/.config/systemd/user`
+4. checks that `ydotool`/`wl-copy`/`paplay` are on your `PATH`
+
+Then:
+
+```sh
+systemctl --user enable --now talkrec.service
+```
+
+runs it as a background daemon that restarts on crash and starts at login —
+no terminal needs to stay open.
+
+### Binding a hotkey (KDE)
+
+talkrec has no built-in global hotkey grab (that's a desktop-level concern,
+and KDE Wayland doesn't let plain apps grab keys globally anyway). Instead:
+
+**System Settings → Shortcuts → Custom Shortcuts** → right-click → **New →
+Global Shortcut → Command/URL**, set the trigger to whatever key combo you
+want, and the command to `~/.local/bin/talkrec-toggle`.
+
+## Configuration
+
+Environment variables (set them in the systemd unit via `Environment=`, or
+export before running manually):
+
+| variable | default | meaning |
+|----------|---------|---------|
+| `TALKREC_MODEL` | `base` | whisper model size (`tiny`, `base`, `small`, ...) — bigger is slower but more accurate |
+| `TALKREC_DEVICE` | `cpu` | inference device passed to whisper |
+| `TALKREC_AUTO_PASTE` | `0` | set to `1` to also send Ctrl+V via ydotool after copying, instead of clipboard-only |
+
+## Known limitations
+
+- No visual confirmation beyond the tray icon color and sound cues — no
+  toast/notification popups, because that requires a running
+  `org.freedesktop.Notifications` service, which not every minimal KDE setup
+  has running. Sound is the reliable channel here.
+- 120-second hard cap per recording (`DURATION_LIMIT` in `libexec/talkrec.py`).
+- English-only transcription (`language="en"` is hardcoded in the transcribe
+  call).
+- ydotool auto-paste needs the ydotool daemon socket; if it's not available,
+  talkrec silently falls back to clipboard-only (which is also the default
+  behavior regardless, via `TALKREC_AUTO_PASTE=0`).
+
+## Uninstall
+
+```sh
+systemctl --user disable --now talkrec.service
+rm ~/.config/systemd/user/talkrec.service ~/.local/bin/talkrec ~/.local/bin/talkrec-toggle
+```
+(only removes the symlinks `install.sh` created; the repo/venv itself is
+untouched — delete the cloned directory yourself if you're done with it)

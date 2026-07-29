@@ -1,0 +1,13 @@
+[Unit]
+Description=TalkRec voice-to-text daemon
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/talkrec
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Send a TOGGLE command to the running talkrec daemon. Bind this to a
+global hotkey via your desktop's shortcut settings (e.g. KDE System Settings
+> Shortcuts > Custom Shortcuts). Uses stdlib only — no venv/PyQt6 needed,
+instant startup.
+"""
+import socket
+import sys
+
+SOCK_PATH = "/tmp/talkrec_unique_server"
+
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(SOCK_PATH)
+    s.sendall(b"TOGGLE")
+    s.close()
+except OSError as e:
+    print(f"talkrec not running or unreachable: {e}", file=sys.stderr)
+    sys.exit(1)

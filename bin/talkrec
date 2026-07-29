@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# talkrec — launches the daemon using the repo's own venv, wherever this
+# script actually lives (resolves through the ~/.local/bin symlink install.sh
+# makes, so it works regardless of where the repo was cloned).
+set -euo pipefail
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+exec "$REPO_DIR/venv/bin/python3" "$REPO_DIR/libexec/talkrec.py"
