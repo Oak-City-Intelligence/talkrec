@@ -43,21 +43,23 @@ git clone <this-repo> && cd talkrec
 ./install.sh
 ```
 
-`install.sh` is idempotent and prints everything it does:
+`install.sh` is an interactive wizard. It asks a few questions up front —
+which whisper model size to use, whether to auto-paste, whether to start the
+service now — writes your answers to `~/.config/talkrec/talkrec.env`, then
+does the mechanical work:
 
 1. creates a venv in the repo (`./venv`) and installs Python dependencies
+   (openai-whisper pulls in torch — first run downloads several GB, and
+   pip's normal progress bar stays visible so it doesn't look stuck)
 2. symlinks `bin/talkrec` and `bin/talkrec-toggle` into `~/.local/bin`
 3. symlinks `systemd/talkrec.service` into `~/.config/systemd/user`
 4. checks that `ydotool`/`wl-copy`/`paplay` are on your `PATH`
+5. optionally starts it right there (`systemctl --user enable --now`)
 
-Then:
-
-```sh
-systemctl --user enable --now talkrec.service
-```
-
-runs it as a background daemon that restarts on crash and starts at login —
-no terminal needs to stay open.
+It's safe to re-run anytime — re-running offers to keep your existing
+config instead of re-asking, and never overwrites a file it didn't create.
+Pass `--yes` (or run it piped/non-interactively) to accept every default
+without being asked anything.
 
 ### Binding a hotkey (KDE)
 
@@ -70,8 +72,14 @@ want, and the command to `~/.local/bin/talkrec-toggle`.
 
 ## Configuration
 
-Environment variables (set them in the systemd unit via `Environment=`, or
-export before running manually):
+`install.sh` writes `TALKREC_MODEL` and `TALKREC_AUTO_PASTE` to
+`~/.config/talkrec/talkrec.env` from your answers to its prompts — both
+`bin/talkrec` and the systemd unit read that file automatically. To change
+your answer later, either edit that file directly, or re-run `install.sh`
+and say no to "keep existing config" when asked.
+
+All variables (can also be exported before running manually, or added to
+the systemd unit via `Environment=`):
 
 | variable | default | meaning |
 |----------|---------|---------|

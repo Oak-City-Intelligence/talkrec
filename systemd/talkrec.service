@@ -5,6 +5,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%h/.config/talkrec/talkrec.env
 ExecStart=%h/.local/bin/talkrec
 Restart=on-failure
 RestartSec=2

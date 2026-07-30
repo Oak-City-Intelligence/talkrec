@@ -4,4 +4,11 @@
 # makes, so it works regardless of where the repo was cloned).
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+CONFIG_FILE="$HOME/.config/talkrec/talkrec.env"
+if [ -f "$CONFIG_FILE" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+  set +a
+fi
 exec "$REPO_DIR/venv/bin/python3" "$REPO_DIR/libexec/talkrec.py"
