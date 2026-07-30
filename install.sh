@@ -21,9 +21,10 @@ if [ ! -x "$REPO_DIR/venv/bin/python3" ]; then
 else
   say "ok:    venv already exists at $REPO_DIR/venv"
 fi
-say "installing/updating Python dependencies ..."
+say "installing/updating Python dependencies (openai-whisper pulls in torch —"
+say "first run downloads several GB; you'll see pip's normal progress below) ..."
 "$REPO_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$REPO_DIR/venv/bin/pip" install --quiet -r "$REPO_DIR/requirements.txt"
+"$REPO_DIR/venv/bin/pip" install -r "$REPO_DIR/requirements.txt"
 say "ok:    dependencies installed"
 
 # 2. symlink the launcher scripts --------------------------------------------

@@ -5,16 +5,19 @@
 talkrec is a local voice-to-text tool. It makes no outbound network
 connections — transcription runs entirely on-device via a local whisper
 model. It listens on nothing network-facing; the only IPC is a Unix domain
-socket at `/tmp/talkrec_unique_server` used to relay the record/stop toggle
-from `talkrec-toggle` (or your hotkey binding) to the running daemon.
+socket at `/run/user/<uid>/talkrec.sock` used to relay the record/stop toggle
+from `talkrec-toggle` (or your hotkey binding) to the running daemon. That
+directory is created by systemd-logind as mode 0700 owned by you, so other
+local users can't reach the socket at all (unlike a fixed name under shared
+`/tmp`, which earlier drafts of this used and which any local user could
+connect to or squat).
 
 A few things worth knowing:
 
-- **The socket accepts any local process's connection.** It's a Unix socket
-  under `/tmp`, filesystem-permission protected to your user, but any
-  process running as you can send it a `TOGGLE` command. That's the same
-  trust boundary as any other user process on your machine — no privilege
-  escalation, but not authenticated beyond filesystem permissions either.
+- **The socket accepts any process running as you.** Any process under your
+  own UID can send it a `TOGGLE` command — that's the same trust boundary as
+  any other process you run, no privilege escalation, but not authenticated
+  beyond that.
 - **Recorded audio is transcribed in memory**, never written to disk. The
   resulting text is placed on your system clipboard and optionally
   auto-pasted (off by default — see `TALKREC_AUTO_PASTE` in the README).

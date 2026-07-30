@@ -4,10 +4,11 @@ global hotkey via your desktop's shortcut settings (e.g. KDE System Settings
 > Shortcuts > Custom Shortcuts). Uses stdlib only — no venv/PyQt6 needed,
 instant startup.
 """
+import os
 import socket
 import sys
 
-SOCK_PATH = "/tmp/talkrec_unique_server"
+SOCK_PATH = f"/run/user/{os.getuid()}/talkrec.sock"
 
 try:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

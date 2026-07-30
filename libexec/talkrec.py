@@ -38,7 +38,8 @@ YDOTOOL_SOCKET = f"/run/user/{os.getuid()}/.ydotool_socket"
 WL_COPY_BIN = shutil.which("wl-copy") or "wl-copy"
 PAPLAY_BIN = shutil.which("paplay") or "paplay"
 
-SINGLE_INSTANCE_SERVER_NAME = "talkrec_unique_server"
+SINGLE_INSTANCE_SERVER_NAME = f"/run/user/{os.getuid()}/talkrec.sock"  # user-owned
+# runtime dir (mode 700), not shared/world-connectable /tmp
 ERROR_SENTINEL = "__TALKREC_ERR__"  # prefix for transcription errors
 TOGGLE_COMMAND = b"TOGGLE"
 
@@ -377,12 +378,22 @@ if __name__ == "__main__":
     if ydotool_ok:
         log.info("ydotool daemon OK")
 
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        log.error("system tray not available!")
+
+    # Loading the model can take a while (first run also downloads the
+    # weights) — show a placeholder icon so there's visible proof-of-life
+    # instead of an empty tray with no explanation.
+    loading_icon = QSystemTrayIcon(draw_icon("processing"))
+    loading_icon.setToolTip(f"TalkRec — loading whisper {WHISPER_MODEL} model...")
+    loading_icon.show()
+
     log.info("Loading whisper %s on %s ...", WHISPER_MODEL, WHISPER_DEVICE)
     whisper_model = whisper.load_model(WHISPER_MODEL, device=WHISPER_DEVICE)
     whisper_model.to(WHISPER_DEVICE)
 
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        log.error("system tray not available!")
+    loading_icon.hide()
+    loading_icon.deleteLater()
     daemon = TalkRecTray(whisper_model)
     play_sound("ding")
     log.info("Ready — click the tray icon or press your bound hotkey")
