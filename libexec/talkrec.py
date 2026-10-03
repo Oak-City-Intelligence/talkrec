@@ -4,13 +4,24 @@
 Click the tray icon or press a hotkey (bound via your desktop's global
 shortcuts to talkrec-toggle, which sends a TOGGLE command over a local
 socket): first press starts recording, second press stops + transcribes with
-whisper, copies the text to your clipboard, dings.
+the configured backend (whisper or whistle, see talkrec_backends.py), copies
+the text to your clipboard, dings.
 
-Requires: PyQt6, sounddevice, openai-whisper, ydotool, wl-copy, paplay.
+Requires: PyQt6, sounddevice, numpy, plus openai-whisper or cactus-needle
+depending on TALKREC_BACKEND; ydotool, wl-copy, paplay.
 """
 
 import sys
 import os
+
+# Bound the math libraries' thread pools before numpy/torch get imported and
+# size them to the whole machine. Explicit settings in the environment win.
+THREADS_DEFAULT = "4"
+_threads_env = os.environ.get("TALKREC_THREADS", THREADS_DEFAULT).strip()
+if _threads_env.isdigit() and int(_threads_env) > 0:
+    for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(_var, _threads_env)
+
 import shutil
 import subprocess
 import time
@@ -18,16 +29,19 @@ import logging
 import logging.handlers
 import numpy as np
 import sounddevice as sd
-import whisper
+from talkrec_backends import make_backend, parse_language, parse_threads
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 
 # ─── Config ───────────────────────────────────────────────
-SAMPLE_RATE = 16000          # whisper native
+SAMPLE_RATE = 16000          # native rate for both backends
 CHANNELS = 1
 DURATION_LIMIT = 120         # seconds max per recording
+BACKEND = os.environ.get("TALKREC_BACKEND", "whisper").strip().lower()  # whisper | whistle
+LANGUAGE = parse_language(os.environ.get("TALKREC_LANGUAGE", "en"))  # "auto" to detect
+THREADS = parse_threads(os.environ.get("TALKREC_THREADS", THREADS_DEFAULT))  # 0 = no cap
 WHISPER_MODEL = os.environ.get("TALKREC_MODEL", "base")  # tiny/base/small/...
 WHISPER_DEVICE = os.environ.get("TALKREC_DEVICE", "cpu")  # cpu keeps this safe
                                                            # to run alongside GPU-bound work
@@ -219,23 +233,17 @@ class RecorderThread(QThread):
 
 # ─── Transcription thread ─────────────────────────────────
 class TranscribeThread(QThread):
-    """Transcribe audio array with whisper."""
+    """Transcribe audio array with the loaded backend."""
     finished = pyqtSignal(str)  # text or error sentinel
 
-    def __init__(self, audio_array, model):
+    def __init__(self, audio_array, backend):
         super().__init__()
         self.audio_array = audio_array
-        self.model = model
+        self.backend = backend
 
     def run(self):
         try:
-            result = self.model.transcribe(
-                self.audio_array,
-                language="en",
-                task="transcribe",
-                fp16=False,
-            )
-            self.finished.emit(result["text"].strip())
+            self.finished.emit(self.backend.transcribe(self.audio_array))
         except Exception as e:
             log.error("transcribe error: %s", e)
             self.finished.emit(f"{ERROR_SENTINEL}{e}")
@@ -243,12 +251,12 @@ class TranscribeThread(QThread):
 
 # ─── Tray icon + daemon ─────────────────────────────────────
 class TalkRecTray(QSystemTrayIcon):
-    def __init__(self, model):
+    def __init__(self, backend):
         super().__init__()
         self.state = "idle"  # idle | recording | processing
         self.recorder = None
         self.transcriber = None
-        self.model = model
+        self.backend = backend
 
         menu = QMenu()
         quit_action = menu.addAction("Quit")
@@ -311,7 +319,7 @@ class TalkRecTray(QSystemTrayIcon):
             self._set_state("idle")
             return
         log.info("recording done, %.1fs audio", len(audio_array)/SAMPLE_RATE)
-        self.transcriber = TranscribeThread(audio_array, self.model)
+        self.transcriber = TranscribeThread(audio_array, self.backend)
         self.transcriber.finished.connect(self.on_transcription_done)
         self.transcriber.start()
 
@@ -319,6 +327,12 @@ class TalkRecTray(QSystemTrayIcon):
         if text.startswith(ERROR_SENTINEL):
             err_msg = text[len(ERROR_SENTINEL):]
             log.error("transcription error: %s", err_msg)
+            play_sound("error")
+            self._set_state("idle")
+            return
+        if not text:
+            # silence or nothing intelligible — leave the clipboard alone
+            log.info("no speech detected")
             play_sound("error")
             self._set_state("idle")
             return
@@ -381,20 +395,23 @@ if __name__ == "__main__":
     if not QSystemTrayIcon.isSystemTrayAvailable():
         log.error("system tray not available!")
 
+    backend = make_backend(BACKEND, model_name=WHISPER_MODEL, device=WHISPER_DEVICE,
+                           language=LANGUAGE, threads=THREADS)
+
     # Loading the model can take a while (first run also downloads the
     # weights) — show a placeholder icon so there's visible proof-of-life
     # instead of an empty tray with no explanation.
     loading_icon = QSystemTrayIcon(draw_icon("processing"))
-    loading_icon.setToolTip(f"TalkRec — loading whisper {WHISPER_MODEL} model...")
+    loading_icon.setToolTip(f"TalkRec — loading {backend.describe()} model...")
     loading_icon.show()
 
-    log.info("Loading whisper %s on %s ...", WHISPER_MODEL, WHISPER_DEVICE)
-    whisper_model = whisper.load_model(WHISPER_MODEL, device=WHISPER_DEVICE)
-    whisper_model.to(WHISPER_DEVICE)
+    log.info("Loading %s (language=%s, threads=%s) ...", backend.describe(),
+             LANGUAGE or "auto", THREADS or "uncapped")
+    backend.load()
 
     loading_icon.hide()
     loading_icon.deleteLater()
-    daemon = TalkRecTray(whisper_model)
+    daemon = TalkRecTray(backend)
     play_sound("ding")
     log.info("Ready — click the tray icon or press your bound hotkey")
 
