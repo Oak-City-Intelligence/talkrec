@@ -1,0 +1,4 @@
+# whistle backend (TALKREC_BACKEND=whistle). No torch; the engine library and
+# the ~17 MB model are downloaded on first use.
+-r requirements.txt
+cactus-needle>=3.1,<4

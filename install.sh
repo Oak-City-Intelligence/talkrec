@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# install.sh — interactive setup for talkrec. Asks a few questions (model
-# size, auto-paste, whether to start it now), then does the mechanical work:
-#   1. creates a venv in this repo and installs Python dependencies into it
+# install.sh — interactive setup for talkrec. Asks a few questions (speech
+# backend, model size, auto-paste, whether to start it now), then does the
+# mechanical work:
+#   1. creates a venv in this repo and installs the chosen backend's Python
+#      dependencies into it
 #   2. symlinks bin/talkrec and bin/talkrec-toggle into ~/.local/bin
 #   3. symlinks the systemd user unit into ~/.config/systemd/user
 #   4. writes your answers to ~/.config/talkrec/talkrec.env
@@ -76,6 +78,20 @@ fi
 
 if [ "$KEEP_CONFIG" = n ]; then
   say ""
+  say "Which speech-to-text backend?"
+  say "  1) whisper — OpenAI's whisper on torch; many languages, several model"
+  say "               sizes, big install (torch is several GB) (default)"
+  say "  2) whistle — small 17 MB CPU model by Cactus Compute; 7 languages"
+  say "               (en de fr es it nl pl), small install, no torch"
+  ask BACKEND_CHOICE "Choice" "1"
+  case "$BACKEND_CHOICE" in
+    2) TALKREC_BACKEND=whistle ;;
+    *) TALKREC_BACKEND=whisper ;;
+  esac
+fi
+
+if [ "$KEEP_CONFIG" = n ] && [ "$TALKREC_BACKEND" = whisper ]; then
+  say ""
   say "Which whisper model?"
   say "  1) tiny   — fastest, least accurate"
   say "  2) base   — balanced (default)"
@@ -88,19 +104,33 @@ if [ "$KEEP_CONFIG" = n ]; then
     4) TALKREC_MODEL=medium ;;
     *) TALKREC_MODEL=base ;;
   esac
+fi
 
+if [ "$KEEP_CONFIG" = n ]; then
+  say ""
   ask_yn AUTO_PASTE_YN "Auto-paste (Ctrl+V) after copying to clipboard, instead of clipboard-only?" n
   [ "$AUTO_PASTE_YN" = y ] && TALKREC_AUTO_PASTE=1 || TALKREC_AUTO_PASTE=0
 
   mkdir -p "$CONFIG_DIR"
-  cat > "$CONFIG_FILE" <<EOF
-TALKREC_MODEL=$TALKREC_MODEL
-TALKREC_AUTO_PASTE=$TALKREC_AUTO_PASTE
-EOF
+  {
+    echo "TALKREC_BACKEND=$TALKREC_BACKEND"
+    [ "$TALKREC_BACKEND" = whisper ] && echo "TALKREC_MODEL=$TALKREC_MODEL"
+    # cap CPU threads so a transcription doesn't take over every core
+    echo "TALKREC_THREADS=4"
+    echo "TALKREC_AUTO_PASTE=$TALKREC_AUTO_PASTE"
+  } > "$CONFIG_FILE"
   say "wrote:  $CONFIG_FILE"
 else
   say "ok:    keeping existing config"
+  # configs written before the backend question existed mean whisper
+  TALKREC_BACKEND="$(sed -n 's/^TALKREC_BACKEND=//p' "$CONFIG_FILE" | tail -n 1)"
+  TALKREC_BACKEND="${TALKREC_BACKEND:-whisper}"
 fi
+case "$TALKREC_BACKEND" in
+  whisper|whistle) ;;
+  *) say "error: unknown TALKREC_BACKEND '$TALKREC_BACKEND' in $CONFIG_FILE (expected whisper or whistle)"
+     exit 1 ;;
+esac
 
 # 1. venv + Python deps -------------------------------------------------------
 say ""
@@ -110,10 +140,15 @@ if [ ! -x "$REPO_DIR/venv/bin/python3" ]; then
 else
   say "ok:    venv already exists at $REPO_DIR/venv"
 fi
-say "installing/updating Python dependencies (openai-whisper pulls in torch —"
-say "first run downloads several GB; you'll see pip's normal progress below) ..."
+if [ "$TALKREC_BACKEND" = whisper ]; then
+  say "installing/updating Python dependencies for whisper (openai-whisper pulls"
+  say "in torch — first run downloads several GB; pip's progress shows below) ..."
+else
+  say "installing/updating Python dependencies for whistle (small; the ~17 MB"
+  say "model itself downloads the first time talkrec starts) ..."
+fi
 "$REPO_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$REPO_DIR/venv/bin/pip" install -r "$REPO_DIR/requirements.txt"
+"$REPO_DIR/venv/bin/pip" install -r "$REPO_DIR/requirements-$TALKREC_BACKEND.txt"
 say "ok:    dependencies installed"
 
 # 2. symlink the launcher scripts --------------------------------------------

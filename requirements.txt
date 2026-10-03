@@ -1,4 +1,5 @@
+# Base dependencies, needed whichever backend you pick. Add the backend's own
+# file on top: requirements-whisper.txt (default) or requirements-whistle.txt.
 PyQt6>=6.11
 sounddevice>=0.5
 numpy>=2.0
-openai-whisper>=20250625
