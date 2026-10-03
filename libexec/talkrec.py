@@ -16,6 +16,7 @@ import os
 
 # Bound the math libraries' thread pools before numpy/torch get imported and
 # size them to the whole machine. Explicit settings in the environment win.
+# This only affects numpy/torch; the whistle engine runs its own pool.
 THREADS_DEFAULT = "4"
 _threads_env = os.environ.get("TALKREC_THREADS", THREADS_DEFAULT).strip()
 if _threads_env.isdigit() and int(_threads_env) > 0:

@@ -79,9 +79,8 @@ class WhistleBackend:
     FRAME_SECONDS = 0.02    # energy is measured over 20 ms frames
     SILENCE_PEAK = 1e-3     # ~ -60 dBFS; quieter than this is treated as no speech
 
-    def __init__(self, language="en", threads=4):
+    def __init__(self, language="en"):
         self.language = language
-        self.threads = threads
         self.model = None
 
     def describe(self):
@@ -92,8 +91,6 @@ class WhistleBackend:
         # nothing leaves the machine, so opt out unless the user opted back in.
         os.environ.setdefault("NEEDLE_TELEMETRY", "0")
         os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-        if self.threads:
-            limit_cpu_affinity(self.threads)
         import needle
         try:
             from needle.agent.whistle import LANGUAGES
@@ -103,6 +100,10 @@ class WhistleBackend:
         if LANGUAGES and self.language is not None and self.language not in LANGUAGES:
             raise ValueError(f"whistle doesn't support language {self.language!r} "
                              f"(supported: {' '.join(LANGUAGES)}, or auto)")
+        # The engine sizes its own worker pool (up to 12) from the online CPU
+        # count and has no thread setting. Don't cap it with CPU affinity: it
+        # still starts the full pool, and squeezed onto fewer CPUs it stalls
+        # (an 11 s clip went from under 1 s to ~40 s pinned to 4 CPUs).
         self.model = needle.Whistle()
 
     def transcribe(self, audio):
@@ -115,24 +116,6 @@ class WhistleBackend:
             if text:
                 texts.append(text)
         return " ".join(texts)
-
-
-def limit_cpu_affinity(threads):
-    """Restrict this thread (and every thread it starts later) to `threads` CPUs.
-
-    The whistle engine sizes its worker pool from the online CPU count (capped
-    at 12) and has no setting for it, but it only schedules its workers on CPUs
-    in the inherited affinity mask — so the mask is the knob. Call this from
-    the main thread before load(): the engine's pool and the per-recording
-    transcription threads are all started from there and inherit it.
-    """
-    try:
-        cpus = sorted(os.sched_getaffinity(0))
-        if len(cpus) > threads:
-            os.sched_setaffinity(0, cpus[:threads])
-            log.info("limited to CPUs %s", cpus[:threads])
-    except (AttributeError, OSError) as e:  # not Linux, or not permitted
-        log.warning("couldn't limit CPU affinity: %s", e)
 
 
 def is_silent(audio, peak=1e-3):
@@ -167,5 +150,5 @@ def make_backend(name, model_name="base", device="cpu", language="en", threads=4
     if name == "whisper":
         return WhisperBackend(model_name, device, language, threads)
     if name == "whistle":
-        return WhistleBackend(language, threads)
+        return WhistleBackend(language)  # threads: whisper only, see load()
     raise ValueError(f"unknown TALKREC_BACKEND {name!r} (expected one of: {', '.join(BACKENDS)})")

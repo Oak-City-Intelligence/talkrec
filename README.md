@@ -45,11 +45,10 @@ wizard or by `TALKREC_BACKEND`:
   - `cactus-needle` sends anonymous usage telemetry by default. talkrec turns
     it off (`NEEDLE_TELEMETRY=0`) unless you've set that variable yourself.
 
-Both run with a bounded number of CPU threads (`TALKREC_THREADS`, default 4)
-so a transcription doesn't take over every core. For whisper that's torch's
-thread count. The whistle engine has no thread setting of its own — it sizes
-its pool from the machine's CPU count — so talkrec restricts the daemon's CPU
-affinity to the first N CPUs it's allowed on instead.
+Whisper runs with a bounded number of CPU threads (`TALKREC_THREADS`,
+default 4, torch's thread count) so a transcription doesn't take over every
+core. Whistle has no thread setting: it uses up to ~12 cores in a short burst
+(well under a second for a typical dictation) and then goes idle.
 
 ## Requirements
 
@@ -103,8 +102,8 @@ want, and the command to `~/.local/bin/talkrec-toggle`.
 
 ## Configuration
 
-`install.sh` writes `TALKREC_BACKEND`, `TALKREC_MODEL` (whisper only),
-`TALKREC_THREADS` and `TALKREC_AUTO_PASTE` to
+`install.sh` writes `TALKREC_BACKEND`, `TALKREC_MODEL` and `TALKREC_THREADS`
+(whisper only), and `TALKREC_AUTO_PASTE` to
 `~/.config/talkrec/talkrec.env` from your answers to its prompts — both
 `bin/talkrec` and the systemd unit read that file automatically. To change
 your answer later, either edit that file directly, or re-run `install.sh`
@@ -117,7 +116,7 @@ the systemd unit via `Environment=`):
 |----------|---------|---------|
 | `TALKREC_BACKEND` | `whisper` | `whisper` or `whistle` (see [Backends](#backends)); the venv needs that backend's requirements installed |
 | `TALKREC_LANGUAGE` | `en` | spoken language code, or `auto` to let the model detect it; whistle supports `en de fr es it nl pl` |
-| `TALKREC_THREADS` | `4` | max CPU threads/cores used for transcription; `0` removes the cap |
+| `TALKREC_THREADS` | `4` | max CPU threads whisper uses for transcription; `0` removes the cap; ignored by whistle |
 | `TALKREC_MODEL` | `base` | whisper model size (`tiny`, `base`, `small`, ...) — bigger is slower but more accurate; ignored by whistle |
 | `TALKREC_DEVICE` | `cpu` | inference device passed to whisper; ignored by whistle |
 | `TALKREC_AUTO_PASTE` | `0` | set to `1` to also send Ctrl+V via ydotool after copying, instead of clipboard-only |
@@ -133,9 +132,8 @@ the systemd unit via `Environment=`):
   is less reliable on short clips.
 - Whistle's chunking can still split a word if someone talks without a
   pause for the last 10 s of a 30 s chunk.
-- With the whistle backend and `TALKREC_THREADS` set, the whole daemon
-  (not just the engine) is restricted to the first N CPUs it's allowed on,
-  and the engine still starts up to 12 worker threads that share them.
+- Whistle's CPU use can't be capped: it has no thread setting and uses up
+  to ~12 cores for each (short) transcription.
 - ydotool auto-paste needs the ydotool daemon socket; if it's not available,
   talkrec silently falls back to clipboard-only (which is also the default
   behavior regardless, via `TALKREC_AUTO_PASTE=0`).

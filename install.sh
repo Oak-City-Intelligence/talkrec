@@ -115,8 +115,8 @@ if [ "$KEEP_CONFIG" = n ]; then
   {
     echo "TALKREC_BACKEND=$TALKREC_BACKEND"
     [ "$TALKREC_BACKEND" = whisper ] && echo "TALKREC_MODEL=$TALKREC_MODEL"
-    # cap CPU threads so a transcription doesn't take over every core
-    echo "TALKREC_THREADS=4"
+    # cap whisper's CPU threads so a transcription doesn't take over every core
+    [ "$TALKREC_BACKEND" = whisper ] && echo "TALKREC_THREADS=4"
     echo "TALKREC_AUTO_PASTE=$TALKREC_AUTO_PASTE"
   } > "$CONFIG_FILE"
   say "wrote:  $CONFIG_FILE"
