@@ -2,8 +2,9 @@
 
 A tiny click-to-record voice-to-text tool: click the tray icon (or press a
 hotkey), speak, click/press again, and the transcription lands on your
-clipboard a couple seconds later. Runs whisper locally on CPU — no network
-calls, no cloud API, nothing leaves your machine.
+clipboard a couple seconds later. Runs speech-to-text locally on CPU — no
+cloud API, nothing leaves your machine (the only network traffic is the
+one-time model download).
 
 **Status: personal tool, pre-1.0, evolving.** Built for one operator's daily
 setup and published as-is. Tested on Arch Linux, KDE Plasma 6, Wayland,
@@ -15,7 +16,7 @@ the tray-click and hotkey-binding steps below are KDE-specific.
 ```
 tray click / hotkey → toggle
   idle -> recording:  starts capturing audio via PipeWire
-  recording -> idle:  stops capture, transcribes with whisper (CPU),
+  recording -> idle:  stops capture, transcribes locally (CPU),
                        copies text to clipboard, plays a done sound
 ```
 
@@ -25,6 +26,31 @@ stdlib-only script so a hotkey press doesn't pay Python/Qt startup cost. The
 daemon itself is a normal PyQt6 tray-icon app; only one instance ever runs
 (a second launch detects the running one and exits).
 
+## Backends
+
+talkrec can transcribe with either of two engines, picked by the install
+wizard or by `TALKREC_BACKEND`:
+
+- **whisper** (default) — [openai-whisper](https://github.com/openai/whisper)
+  on torch. Many languages and several model sizes (`TALKREC_MODEL`). The
+  install is big: torch alone is several GB.
+- **whistle** — a small (~17 MB) CPU speech model by Cactus Compute, run
+  through the [`cactus-needle`](https://pypi.org/project/cactus-needle/)
+  package (Apache-2.0). English, German, French, Spanish, Italian, Dutch and
+  Polish. No torch; the engine library and model download on first start.
+  - Whistle only accepts up to 30 s of audio per call, so talkrec splits
+    longer recordings into chunks of at most 30 s, cutting each one at the
+    quietest 20 ms stretch in its last 10 s (so cuts land in pauses, not
+    mid-word) and joins the texts with a space.
+  - `cactus-needle` sends anonymous usage telemetry by default. talkrec turns
+    it off (`NEEDLE_TELEMETRY=0`) unless you've set that variable yourself.
+
+Both run with a bounded number of CPU threads (`TALKREC_THREADS`, default 4)
+so a transcription doesn't take over every core. For whisper that's torch's
+thread count. The whistle engine has no thread setting of its own — it sizes
+its pool from the machine's CPU count — so talkrec restricts the daemon's CPU
+affinity to the first N CPUs it's allowed on instead.
+
 ## Requirements
 
 - Linux with PipeWire (used for audio capture and for its `pipewire` virtual
@@ -33,8 +59,9 @@ daemon itself is a normal PyQt6 tray-icon app; only one instance ever runs
 - A working system tray (any freedesktop StatusNotifierItem host)
 - Python 3.10+
 - System tools: `ydotool` (optional, for auto-paste), `wl-copy`, `paplay`
-- Python packages: see `requirements.txt` (PyQt6, sounddevice, numpy,
-  openai-whisper — the latter pulls in torch)
+- Python packages: `requirements.txt` (PyQt6, sounddevice, numpy) plus the
+  backend's own file — `requirements-whisper.txt` (openai-whisper, which
+  pulls in torch) or `requirements-whistle.txt` (cactus-needle)
 
 ## Install
 
@@ -44,13 +71,14 @@ git clone <this-repo> && cd talkrec
 ```
 
 `install.sh` is an interactive wizard. It asks a few questions up front —
-which whisper model size to use, whether to auto-paste, whether to start the
-service now — writes your answers to `~/.config/talkrec/talkrec.env`, then
+which backend (whisper or whistle), which whisper model size (whisper only),
+whether to auto-paste, whether to start the service now — writes your answers to `~/.config/talkrec/talkrec.env`, then
 does the mechanical work:
 
-1. creates a venv in the repo (`./venv`) and installs Python dependencies
-   (openai-whisper pulls in torch — first run downloads several GB, and
-   pip's normal progress bar stays visible so it doesn't look stuck)
+1. creates a venv in the repo (`./venv`) and installs the Python
+   dependencies for the backend you picked (for whisper, openai-whisper
+   pulls in torch — first run downloads several GB, and pip's normal
+   progress bar stays visible so it doesn't look stuck)
 2. symlinks `bin/talkrec` and `bin/talkrec-toggle` into `~/.local/bin`
 3. symlinks `systemd/talkrec.service` into `~/.config/systemd/user`
 4. checks that `ydotool`/`wl-copy`/`paplay` are on your `PATH`
@@ -59,7 +87,10 @@ does the mechanical work:
 It's safe to re-run anytime — re-running offers to keep your existing
 config instead of re-asking, and never overwrites a file it didn't create.
 Pass `--yes` (or run it piped/non-interactively) to accept every default
-without being asked anything.
+(whisper, `base` model) without being asked anything.
+
+To switch backends later, re-run `install.sh` and say no to "keep existing
+config" — it installs the other backend's dependencies into the same venv.
 
 ### Binding a hotkey (KDE)
 
@@ -72,7 +103,8 @@ want, and the command to `~/.local/bin/talkrec-toggle`.
 
 ## Configuration
 
-`install.sh` writes `TALKREC_MODEL` and `TALKREC_AUTO_PASTE` to
+`install.sh` writes `TALKREC_BACKEND`, `TALKREC_MODEL` (whisper only),
+`TALKREC_THREADS` and `TALKREC_AUTO_PASTE` to
 `~/.config/talkrec/talkrec.env` from your answers to its prompts — both
 `bin/talkrec` and the systemd unit read that file automatically. To change
 your answer later, either edit that file directly, or re-run `install.sh`
@@ -83,8 +115,11 @@ the systemd unit via `Environment=`):
 
 | variable | default | meaning |
 |----------|---------|---------|
-| `TALKREC_MODEL` | `base` | whisper model size (`tiny`, `base`, `small`, ...) — bigger is slower but more accurate |
-| `TALKREC_DEVICE` | `cpu` | inference device passed to whisper |
+| `TALKREC_BACKEND` | `whisper` | `whisper` or `whistle` (see [Backends](#backends)); the venv needs that backend's requirements installed |
+| `TALKREC_LANGUAGE` | `en` | spoken language code, or `auto` to let the model detect it; whistle supports `en de fr es it nl pl` |
+| `TALKREC_THREADS` | `4` | max CPU threads/cores used for transcription; `0` removes the cap |
+| `TALKREC_MODEL` | `base` | whisper model size (`tiny`, `base`, `small`, ...) — bigger is slower but more accurate; ignored by whistle |
+| `TALKREC_DEVICE` | `cpu` | inference device passed to whisper; ignored by whistle |
 | `TALKREC_AUTO_PASTE` | `0` | set to `1` to also send Ctrl+V via ydotool after copying, instead of clipboard-only |
 
 ## Known limitations
@@ -94,8 +129,13 @@ the systemd unit via `Environment=`):
   `org.freedesktop.Notifications` service, which not every minimal KDE setup
   has running. Sound is the reliable channel here.
 - 120-second hard cap per recording (`DURATION_LIMIT` in `libexec/talkrec.py`).
-- English-only transcription (`language="en"` is hardcoded in the transcribe
-  call).
+- One language per setup (`TALKREC_LANGUAGE`); `auto` detection works but
+  is less reliable on short clips.
+- Whistle's chunking can still split a word if someone talks without a
+  pause for the last 10 s of a 30 s chunk.
+- With the whistle backend and `TALKREC_THREADS` set, the whole daemon
+  (not just the engine) is restricted to the first N CPUs it's allowed on,
+  and the engine still starts up to 12 worker threads that share them.
 - ydotool auto-paste needs the ydotool daemon socket; if it's not available,
   talkrec silently falls back to clipboard-only (which is also the default
   behavior regardless, via `TALKREC_AUTO_PASTE=0`).
