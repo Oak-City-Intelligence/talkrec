@@ -21,7 +21,7 @@ tray click / hotkey → toggle
 ```
 
 The daemon and the hotkey are separate processes talking over a local Unix
-socket (`/tmp/talkrec_unique_server`) — `talkrec-toggle` is a small
+socket (`/run/user/$UID/talkrec.sock`) — `talkrec-toggle` is a small
 stdlib-only script so a hotkey press doesn't pay Python/Qt startup cost. The
 daemon itself is a normal PyQt6 tray-icon app; only one instance ever runs
 (a second launch detects the running one and exits).
